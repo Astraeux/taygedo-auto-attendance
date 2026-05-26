@@ -1,20 +1,33 @@
 # 塔吉多自动签到
 
-塔吉多自动签到工具。第一次用 GitHub 也可以按下面 6 步完成：Fork、开 Actions、加 Secret、登录、测试签到。
+使用 TypeScript 实现的塔吉多自动签到工具，支持多账号、自动重登、通知推送和多种自托管部署方式。
 
-支持：GitHub Actions、Cloudflare Workers、Docker、本地 CLI；默认尝试签到全部已知游戏 `1256`、`1257`、`1289`。
+支持平台：GitHub Actions、Cloudflare Workers、Docker、本地 CLI。默认尝试签到全部已知游戏 `1256`、`1257`、`1289`。
+
+## 功能特点
+
+- 支持多账号签到和账号配置自动写回
+- 支持 GitHub Actions 定时签到和手动触发
+- 支持 Cloudflare Workers 定时任务、HTTP 手动触发和 KV 存储
+- 支持 Docker / Docker Compose 和本地 CLI
+- 支持短信验证码登录、账号密码登录
+- 支持普通 webhook 和 Server 酱通知
 
 ## 快速开始
 
-### 1. Fork 这个仓库
+### GitHub Actions 部署
 
-点页面右上角 **Fork**，把仓库复制到自己的 GitHub 账号下。
+适合第一次使用 GitHub 的用户。Fork 后配置几个 Secret，就可以每天自动签到。
 
-### 2. 打开 Actions
+#### 1. Fork 仓库
 
-进入你 Fork 后的仓库，点上方 **Actions**。如果 GitHub 提示启用 workflow，点确认启用。
+点击页面右上角 **Fork**，把仓库复制到自己的 GitHub 账号下。
 
-### 3. 创建 GitHub PAT
+#### 2. 启用 Actions
+
+进入 Fork 后的仓库，打开 **Actions**。如果 GitHub 提示启用 workflow，点击确认启用。
+
+#### 3. 创建 GitHub PAT
 
 这个 token 用来让 workflow 自动更新账号 Secret。
 
@@ -25,27 +38,26 @@
 5. Repository permissions 里把 **Secrets** 设为 **Read and write**
 6. 复制生成的 token
 
-### 4. 添加必要 Secret
+#### 4. 配置 GitHub Secrets
 
-进入你 Fork 后仓库的：
+进入 Fork 后仓库：
 
 ```text
 Settings -> Secrets and variables -> Actions -> New repository secret
 ```
 
-先添加：
+添加：
 
-```text
-GH_SECRET_UPDATE_TOKEN=上一步复制的 PAT
-```
+| Secret 名称 | 说明 | 是否必填 |
+| --- | --- | --- |
+| `GH_SECRET_UPDATE_TOKEN` | 上一步生成的 GitHub PAT，用于写回 `TAYGEDO_ACCOUNTS` | 必填 |
+| `TAYGEDO_LOGIN_PASSWORD` | 密码登录和单账号自动重登使用 | 推荐 |
+| `TAYGEDO_PASSWORDS` | 多账号自动重登用密码映射，例如 `{"main":"密码"}` | 可选 |
+| `TAYGEDO_NOTIFICATION_URLS` | 普通 webhook，多个用英文逗号分隔 | 可选 |
+| `TAYGEDO_SERVERCHAN_SENDKEY` | Server 酱 SendKey | 可选 |
+| `TAYGEDO_MAX_RETRIES` | 单账号最大重试次数，默认 `3` | 可选 |
 
-如果准备使用账号密码登录，再添加：
-
-```text
-TAYGEDO_LOGIN_PASSWORD=你的塔吉多登录密码
-```
-
-### 5. 添加账号
+#### 5. 添加账号
 
 进入 **Actions** -> **塔吉多登录** -> **Run workflow**。
 
@@ -58,19 +70,15 @@ account_id=main
 account_name=主账号
 ```
 
-其中 `mode`、`account_id`、`account_name` 已经有默认值，第一次只要填手机号即可。
-
-`password` 输入框可以留空，workflow 会读取 `TAYGEDO_LOGIN_PASSWORD` Secret。
+`mode`、`account_id`、`account_name` 已有默认值，第一次通常只需要填手机号。`password` 输入框可以留空，workflow 会读取 `TAYGEDO_LOGIN_PASSWORD` Secret。
 
 运行成功后，会自动创建或更新 `TAYGEDO_ACCOUNTS` Secret。
 
-如果失败提示 `Missing required env TAYGEDO_LOGIN_PASSWORD`，说明还没有添加 `TAYGEDO_LOGIN_PASSWORD` Secret，或者直接在本次 Run workflow 的 `password` 输入框里填了密码。
-
-### 6. 测试签到
+#### 6. 执行签到
 
 进入 **Actions** -> **塔吉多签到** -> **Run workflow**。
 
-看到日志里出现类似下面内容，就说明部署好了：
+看到类似下面的日志就说明部署完成：
 
 ```text
 塔吉多每日签到结果
@@ -79,18 +87,141 @@ account_name=主账号
 
 之后 workflow 会按计划每天自动运行。
 
-## 短信验证码登录
+### Cloudflare Workers 部署
 
-如果不想保存密码，可以用短信模式。
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/zzstar101/taygedo-auto-attendance)
 
-第一次运行 **塔吉多登录**：
+部署后配置环境变量：
+
+```text
+TAYGEDO_ADMIN_TOKEN=手动触发和登录接口使用的随机字符串
+TAYGEDO_PASSWORDS={"main":"你的塔吉多密码"}
+```
+
+可选：
+
+```text
+TAYGEDO_ACCOUNTS=[账号 JSON]
+TAYGEDO_NOTIFICATION_URLS=webhook 地址
+TAYGEDO_SERVERCHAN_SENDKEY=Server 酱 SendKey
+```
+
+Worker 使用绑定名为 `KV` 的 Cloudflare KV。可以从 `TAYGEDO_ACCOUNTS` 初始化，也可以通过登录接口生成账号配置。
+
+通过密码登录并写入 KV：
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <TAYGEDO_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"password","phone":"13800138000","password":"你的塔吉多密码","accountId":"main","accountName":"主账号"}' \
+  https://你的-worker.workers.dev/login
+```
+
+手动触发签到：
+
+```bash
+curl -H "Authorization: Bearer <TAYGEDO_ADMIN_TOKEN>" https://你的-worker.workers.dev/run
+```
+
+### Docker 部署
+
+Docker Compose 默认使用 GHCR 镜像：
+
+```bash
+mkdir -p data
+```
+
+创建 `.env`：
+
+```bash
+TAYGEDO_LOGIN_PASSWORD=your-password
+TAYGEDO_PASSWORDS={"main":"your-password"}
+TAYGEDO_NOTIFICATION_URLS=
+TAYGEDO_SERVERCHAN_SENDKEY=
+TAYGEDO_MAX_RETRIES=3
+```
+
+生成账号文件：
+
+```bash
+docker compose run --rm taygedo-attendance \
+  pnpm local login \
+  --mode password \
+  --phone 13800138000 \
+  --account-id main \
+  --account-name 主账号 \
+  --accounts-file /data/accounts.json
+```
+
+运行一次签到：
+
+```bash
+docker compose run --rm taygedo-attendance
+```
+
+本地构建镜像：
+
+```bash
+docker compose build
+docker compose run --rm taygedo-attendance
+```
+
+镜像 workflow 会推送 `linux/amd64` 和 `linux/arm64`。
+
+### 本地 CLI
+
+安装依赖：
+
+```bash
+pnpm install
+```
+
+生成账号文件：
+
+```bash
+TAYGEDO_LOGIN_PASSWORD=your-password pnpm local login \
+  --mode password \
+  --phone 13800138000 \
+  --account-id main \
+  --account-name 主账号 \
+  --accounts-file data/accounts.json
+```
+
+执行签到：
+
+```bash
+TAYGEDO_PASSWORDS='{"main":"your-password"}' pnpm local attendance \
+  --accounts-file data/accounts.json \
+  --state-dir data/state
+```
+
+## 登录方式
+
+### 密码登录
+
+推荐用于 GitHub Actions、Docker、本地 CLI 和 Cloudflare Workers。密码只用于登录请求，不写入账号 JSON。
+
+如果需要自动账密重登，请配置：
+
+```text
+TAYGEDO_PASSWORDS={"main":"你的塔吉多密码"}
+```
+
+单账号也可以使用：
+
+```text
+TAYGEDO_LOGIN_PASSWORD=你的塔吉多密码
+```
+
+### 短信验证码登录
+
+如果不想保存密码，可以用短信模式。GitHub Actions 中第一次运行 **塔吉多登录**：
 
 ```text
 mode=send-code
 phone=你的手机号
 ```
-
-workflow 会自动保存 `TAYGEDO_LOGIN_DEVICE_ID` Secret。
 
 收到验证码后再运行：
 
@@ -102,33 +233,11 @@ account_id=main
 account_name=主账号
 ```
 
-## 多账号
+## 配置说明
 
-重复运行登录 workflow，换一个 `account_id` 即可：
+### 账号 JSON
 
-```text
-account_id=alt
-account_name=小号
-```
-
-已有 `account_id` 会被覆盖；新的 `account_id` 会追加。
-
-## 常用 Secret
-
-| 名称 | 说明 |
-| --- | --- |
-| `GH_SECRET_UPDATE_TOKEN` | 必填，用于写回 `TAYGEDO_ACCOUNTS` |
-| `TAYGEDO_ACCOUNTS` | 登录 workflow 自动生成，通常不用手写 |
-| `TAYGEDO_LOGIN_PASSWORD` | 密码登录推荐使用的密码 Secret |
-| `TAYGEDO_PASSWORDS` | 多账号自动重登用密码映射，例如 `{"main":"密码"}` |
-| `TAYGEDO_LOGIN_DEVICE_ID` | 短信登录自动生成 |
-| `TAYGEDO_NOTIFICATION_URLS` | 普通 webhook，多个用英文逗号分隔 |
-| `TAYGEDO_SERVERCHAN_SENDKEY` | Server 酱 SendKey |
-| `TAYGEDO_MAX_RETRIES` | 单账号最大重试次数，默认 `3` |
-
-## 账号 JSON
-
-`TAYGEDO_ACCOUNTS` 是账号数组，示例：
+`TAYGEDO_ACCOUNTS` / `accounts.json` 是账号数组，示例：
 
 ```json
 [
@@ -147,101 +256,62 @@ account_name=小号
 ]
 ```
 
-账号 JSON 不保存明文密码。需要自动账密重登时，把密码放在运行环境里：
+账号 JSON 不保存明文密码。旧配置中如果存在 `password` / `passwordUpdatedAt`，程序读取后会丢弃，后续写回会自然清理。
+
+### 多账号
+
+重复运行登录流程，换一个 `account_id` 即可：
 
 ```text
-TAYGEDO_PASSWORDS={"main":"你的塔吉多密码"}
+account_id=alt
+account_name=小号
 ```
 
-`accessToken` 失效且账号有 `phone`，并且运行环境能按 `account_id` 或手机号找到密码时，会优先账密重登；失败后再尝试 `refreshToken` 和老虎登录凭证。
-
-## Cloudflare Workers
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/zzstar101/taygedo-auto-attendance)
-
-部署后配置：
+已有 `account_id` 会被覆盖；新的 `account_id` 会追加。多账号自动重登推荐配置：
 
 ```text
-TAYGEDO_ACCOUNTS=[账号 JSON]
-TAYGEDO_ADMIN_TOKEN=手动触发用的随机字符串
+TAYGEDO_PASSWORDS={"main":"主账号密码","alt":"小号密码"}
 ```
 
-可选：
+### 通知
+
+普通 webhook：
 
 ```text
-TAYGEDO_NOTIFICATION_URLS=webhook 地址
-TAYGEDO_SERVERCHAN_SENDKEY=Server 酱 SendKey
+TAYGEDO_NOTIFICATION_URLS=https://example.com/webhook
 ```
 
-Worker 使用绑定名为 `KV` 的 Cloudflare KV。首次运行会从 `TAYGEDO_ACCOUNTS` 初始化 KV，之后账号更新写回 KV。
+Server 酱：
 
-通过密码登录并写入 KV：
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer <TAYGEDO_ADMIN_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"password","phone":"13800138000","password":"你的塔吉多密码","accountId":"main","accountName":"主账号"}' \
-  https://你的-worker.workers.dev/login
+```text
+TAYGEDO_SERVERCHAN_SENDKEY=SCTxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-手动触发：
+两个配置可以同时使用。
 
-```bash
-curl -H "Authorization: Bearer <TAYGEDO_ADMIN_TOKEN>" https://你的-worker.workers.dev/run
-```
+### 存储
 
-## Docker
+| 配置 | 说明 |
+| --- | --- |
+| `TAYGEDO_ACCOUNT_STORE` | 账号存储，支持 `env`、`file`、`cloudflare-kv`、`upstash` |
+| `TAYGEDO_STATE_STORE` | 状态存储，支持 `memory`、`file`、`cloudflare-kv`、`upstash` |
+| `TAYGEDO_ACCOUNTS_KEY` | 账号存储 key，默认 `TAYGEDO_ACCOUNTS` |
+| `TAYGEDO_STATE_PREFIX` | 状态存储前缀，默认 `taygedo` |
+| `TAYGEDO_UPSTASH_REDIS_REST_URL` | Upstash REST URL |
+| `TAYGEDO_UPSTASH_REDIS_REST_TOKEN` | Upstash REST Token |
 
-生成账号文件：
+Cloudflare Workers 默认使用 KV；Docker 和本地 CLI 默认使用文件存储。
 
-```bash
-mkdir -p data
-docker compose run --rm taygedo-attendance \
-  -e TAYGEDO_LOGIN_PASSWORD=your-password \
-  pnpm local login \
-  --mode password \
-  --phone 13800138000 \
-  --account-id main \
-  --account-name 主账号 \
-  --accounts-file /data/accounts.json
-```
+## 注意事项
 
-使用 compose 运行一次签到：
-
-```bash
-docker compose run --rm taygedo-attendance
-```
-
-使用本地构建镜像：
-
-```bash
-docker compose build
-docker compose run --rm taygedo-attendance
-```
-
-镜像 workflow 会推送 `linux/amd64` 和 `linux/arm64`。
-
-## 本地 CLI
-
-```bash
-pnpm install
-pnpm local attendance --accounts-file data/accounts.json --state-dir data/state
-```
-
-本地账密登录：
-
-```bash
-TAYGEDO_LOGIN_PASSWORD=your-password pnpm local login --mode password --phone 13800138000 --account-id main --account-name 主账号 --accounts-file data/accounts.json
-```
-
-## 安全提示
-
-本项目不会把登录密码写入 `accounts.json`、Cloudflare KV 或 GitHub Secret 里的账号 JSON。需要自动重登时，请把密码放在 GitHub Secret、Cloudflare Secret、Docker `.env` 或本地环境变量里，不要写进 README、issue、日志或公开文件。
+- 本项目仅用于学习和研究目的。
+- 请勿频繁调用接口，以免影响账号安全。
+- 请不要把密码、token、账号 JSON 发到 issue、README、公开日志或聊天截图里。
+- GitHub Actions 免费额度通常够用；如果仓库长期无活动，GitHub 可能会停用定时 workflow，可手动触发或提交新 commit 恢复。
 
 ## 致谢
 
-- [AEtherside/skland-daily-attendance](https://github.com/AEtherside/skland-daily-attendance)：多平台部署、Cloudflare Worker、Docker、存储抽象等方向参考。
+- [AEtherside/skland-daily-attendance](https://github.com/AEtherside/skland-daily-attendance)：多平台部署、Cloudflare Worker、Docker、存储抽象和 README 结构参考。
 - [SkyBlue997/tjd-daily](https://github.com/SkyBlue997/tjd-daily)：塔吉多登录、账密重登、任务流程和协议细节参考。
 
 ## 开源协议
