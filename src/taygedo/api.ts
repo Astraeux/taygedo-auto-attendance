@@ -604,7 +604,7 @@ export class TaygedoApi {
       msg?: string
       data?: unknown
     }
-    const post = isRecord(data.data) ? toRecommendPost(data.data) : undefined
+    const post = isRecord(data.data) ? toPostFull(data.data, postId) : undefined
 
     if (!response.ok || data.code !== 0 || !post) {
       throw apiResponseError('getPostFull', response, data, '获取帖子详情请求失败')
@@ -759,6 +759,23 @@ function toRecommendPost(value: Record<string, unknown>): RecommendPost | undefi
         }
       : {}),
   }
+}
+
+function toPostFull(value: Record<string, unknown>, fallbackPostId: string): RecommendPost | undefined {
+  const directPost = toRecommendPost(value)
+  if (directPost) {
+    return directPost
+  }
+
+  if (!isRecord(value.post)) {
+    return undefined
+  }
+
+  return toRecommendPost({
+    postId: fallbackPostId,
+    selfOperation: value.selfOperation,
+    ...value.post,
+  })
 }
 
 function toGameRecordCard(value: Record<string, unknown>): GameRecordCardResponse['cards'][number] | undefined {
