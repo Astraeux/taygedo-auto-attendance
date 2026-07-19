@@ -77,7 +77,10 @@ export class TaygedoApi {
   private readonly fetchImpl: typeof fetch
 
   constructor(options: TaygedoApiOptions = {}) {
-    this.fetchImpl = options.fetch ?? fetch
+    // Workerd requires the platform fetch function to keep globalThis as its
+    // receiver. Wrapping it avoids an "Illegal invocation" when this client
+    // stores and later calls the function as a class field.
+    this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init))
   }
 
   async sendCaptcha(phone: string, deviceId: string): Promise<void> {
@@ -761,7 +764,10 @@ function cloudSign(data: Record<string, string>): string {
 
 function aesBase64Encode(value: string): string {
   const key = Buffer.from(LAOHU_SECRET.slice(-16), 'utf8')
-  const cipher = createCipheriv('aes-128-ecb', key, null)
+  // ECB does not use an IV. Workerd's node:crypto compatibility layer rejects
+  // null here even though Node.js accepts it, while a zero-length buffer works
+  // in both runtimes and still represents "no IV".
+  const cipher = createCipheriv('aes-128-ecb', key, Buffer.alloc(0))
   cipher.setAutoPadding(true)
   return Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]).toString('base64')
 }
